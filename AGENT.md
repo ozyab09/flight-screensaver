@@ -101,6 +101,21 @@ WebMessageReceived                    mapReady | tilesOk | error | diag
    Маршрутизированные события WPF до окна не доходят, поэтому ввод
    подключён через `AddHandler(..., handledEventsToo: true)` и опрос позиции
    курсора `GetCursorPos`. Обычные подписки в XAML не работают.
+   `Window_MouseMove` оставлен как запасной путь, если `GetCursorPos`
+   недоступен.
+5. **`GetCursorPos` требует интерактивного window station.** В CI, сервисах
+   и процессах, запущенных не из пользовательской сессии, он возвращает
+   `False`, а `GetForegroundWindow` — ноль. Тогда опрос курсора молча ничего
+   не делает и мышь не закрывает заставку. Прежде чем искать баг в коде,
+   проверьте среду запуска:
+
+   ```powershell
+   Add-Type 'using System;using System.Runtime.InteropServices;
+     public class G{public struct P{public int X,Y;}
+       [DllImport("user32.dll")]public static extern bool GetCursorPos(out P p);}'
+   $pt = New-Object G+P
+   [G]::GetCursorPos([ref]$pt)   # False = не интерактивная среда
+   ```
 5. **Формат сообщений C# ↔ страница.** `PostWebMessageAsJson` передаёт в JS
    объект, поэтому JS обязан слать объект, а не `JSON.stringify(...)`.
    Иначе C# получит строковый литерал и не найдёт поле `type`.
