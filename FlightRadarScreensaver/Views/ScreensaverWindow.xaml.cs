@@ -26,6 +26,8 @@ public partial class ScreensaverWindow : Window
     // поверх WebView2, т.к. это отдельное HWND и оно съедает мышиные события WPF.
     private readonly DispatcherTimer _cursorTimer;
     private bool _cursorPrimed;
+    private bool _mouseSeen;
+    private Point _lastMousePoint;
     private int _cursorX, _cursorY;
 
     private CancellationTokenSource? _flightCts;
@@ -62,7 +64,18 @@ public partial class ScreensaverWindow : Window
         _loadTimeoutTimer.Tick += (_, _) => RevealMap("таймаут загрузки карты");
 
         _cursorTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
-        _cursorTimer.Tick += (_, _) => CheckCursorMovement();
+        _cursorTimer.Tick += (_, _) =>
+        {
+            try
+            {
+                CheckCursorMovement();
+            }
+            catch (Exception ex)
+            {
+                // Ошибка в опросе курсора не должна ронять заставку
+                System.Diagnostics.Debug.WriteLine("CheckCursorMovement: " + ex);
+            }
+        };
 
         var appIcon = App.LoadAppIcon();
         if (appIcon != null) Icon = appIcon;
@@ -107,9 +120,9 @@ public partial class ScreensaverWindow : Window
 
         if (_cmdLine.IsTestPreview)
         {
-            // Кнопка «Проверить»: обычное окно поверх настроек, управляется мышью.
-            Title = "Предпросмотр — FlightRadar Screensaver (Esc — закрыть)";
-            WindowStyle = WindowStyle.None;
+            // Кнопка «Проверить» в настройках. Обычная рамка окна, чтобы были заголовок и крестик.
+            Title = "Предпросмотр — FlightRadar Screensaver";
+            WindowStyle = WindowStyle.SingleBorderWindow;
             WindowState = WindowState.Normal;
             Width = 1100;
             Height = 680;
@@ -118,6 +131,9 @@ public partial class ScreensaverWindow : Window
             Cursor = Cursors.Arrow;
             ShowInTaskbar = false;
             _hideInfoTimer.Stop();
+
+            // Закрываем, когда курсор уходит за окно
+            _cursorTimer.Start();
             return;
         }
 
@@ -139,6 +155,23 @@ public partial class ScreensaverWindow : Window
     {
         if (_closing || !GetCursorPos(out var p)) return;
 
+        // В окне предпросмотра закрываем не на любое движение (иначе нельзя
+        // навести курсор и кликнуть по самолёту), а когда курсор уведён
+        // за пределы окна.
+        if (_cmdLine.IsTestPreview)
+        {
+            if (!_cursorPrimed)
+            {
+                _cursorPrimed = true;
+                return;
+            }
+
+            if (!IsCursorInsideWindow(p))
+                ExitScreensaver("курсор уведён за окно предпросмотра");
+
+            return;
+        }
+
         if (!_cursorPrimed)
         {
             _cursorPrimed = true;
@@ -156,6 +189,17 @@ public partial class ScreensaverWindow : Window
             _cursorY = p.Y;
             ExitScreensaver($"mouse moved ({dx},{dy})");
         }
+    }
+
+    /// <summary>Находится ли точка экрана внутри окна (с небольшим запасом).</summary>
+    private bool IsCursorInsideWindow(POINT point)
+    {
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero || !GetWindowRect(hwnd, out var r)) return true;
+
+        const int margin = 8;
+        return point.X >= r.Left - margin && point.X <= r.Right + margin
+            && point.Y >= r.Top - margin && point.Y <= r.Bottom + margin;
     }
 
     private async Task OnLoadedAsync()
@@ -517,8 +561,21 @@ private async Task LogPageDiagnosticsAsync()
 
     private void Window_MouseMove(object sender, MouseEventArgs e)
     {
-        // Основной способ отловить мышь — CheckCursorMovement().
-        // Это событие срабатывает не всегда, т.к. ввод перехватывает WebView2.
+        // Основной способ отловить мышь — опрос GetCursorPos.
+        // Это событие срабатывает не всегда (ввод перехватывает WebView2),
+        // поэтому служит запасным вариантом.
+        if (IsRealPreview || _cmdLine.IsTestPreview) return;
+
+        if (!_mouseSeen)
+        {
+            _mouseSeen = true;
+            _lastMousePoint = e.GetPosition(this);
+            return;
+        }
+
+        var pos = e.GetPosition(this);
+        if (Math.Abs(pos.X - _lastMousePoint.X) > 2 || Math.Abs(pos.Y - _lastMousePoint.Y) > 2)
+            ExitScreensaver("mouse move event");
     }
 
     private void Window_MouseDown(object sender, MouseButtonEventArgs e)
@@ -558,8 +615,14 @@ private async Task LogPageDiagnosticsAsync()
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X; public int Y; }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
