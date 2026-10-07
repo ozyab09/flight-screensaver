@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Сборка и развёртывание
-    url: https://github.com/OWNER/FlightRadarScreensaver/blob/main/CONTRIBUTING.md
+    url: https://github.com/ozyab09/flight-screensaver/blob/main/CONTRIBUTING.md
     about: Как собрать проект, требования и известные подводные камни
   - name: Данные OpenSky Network
     url: https://opensky-network.org/apidoc/rest.html

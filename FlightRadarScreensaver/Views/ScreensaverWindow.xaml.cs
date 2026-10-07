@@ -469,6 +469,16 @@ private async Task LogPageDiagnosticsAsync()
         // Освобождаем HWND WebView2 — иначе он удерживает процесс
         try { WebView.Dispose(); } catch { }
 
+        // Сторож: WebView2 держит дочерние процессы браузера, и Shutdown()
+        // не всегда завершает приложение. Через пару секунд выходим жёстко.
+        var watchdog = new Thread(() =>
+        {
+            Thread.Sleep(2500);
+            Environment.Exit(0);
+        })
+        { IsBackground = true, Name = "ExitWatchdog" };
+        watchdog.Start();
+
         try
         {
             Application.Current?.Shutdown();
@@ -483,6 +493,11 @@ private async Task LogPageDiagnosticsAsync()
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
         if (_closing) return;
+
+        // В окне предпросмотра ввод игнорируем: этот режим запускает Windows
+        // из «Параметров экранной заставки». Иначе Esc закрывает наш процесс,
+        // а диалог тут же запускает его заново с /p — выглядит как «не выходит».
+        if (IsRealPreview) return;
 
         if (_cmdLine.IsTestPreview)
         {
@@ -509,6 +524,7 @@ private async Task LogPageDiagnosticsAsync()
     private void Window_MouseDown(object sender, MouseButtonEventArgs e)
     {
         if (_cmdLine.IsTestPreview || IsRealPreview) return;
+
         ExitScreensaver($"mouse down ({e.ChangedButton})");
     }
 

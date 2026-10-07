@@ -35,5 +35,5 @@
 - Настройки: координаты вручную, масштаб, подписи и следы.
 - Установщик `install.bat`.
 
-[Unreleased]: https://github.com/OWNER/FlightRadarScreensaver/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/OWNER/FlightRadarScreensaver/releases/tag/v1.0.0
+[Unreleased]: https://github.com/ozyab09/flight-screensaver/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ozyab09/flight-screensaver/releases/tag/v1.0.0
