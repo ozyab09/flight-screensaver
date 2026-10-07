@@ -28,24 +28,20 @@ jobs:
         run: dotnet restore FlightRadarScreensaver/FlightRadarScreensaver.csproj
 
       - name: Собрать (Release)
-        run: >
-          dotnet build FlightRadarScreensaver/FlightRadarScreensaver.csproj
-          -c Release --no-restore
+        run: dotnet build FlightRadarScreensaver/FlightRadarScreensaver.csproj -c Release --no-restore
 
-      - name: Опубликовать (framework-dependent)
-        run: >
-          dotnet publish FlightRadarScreensaver/FlightRadarScreensaver.csproj
-          -c Release --no-build
-          -o artifacts/publish
+      - name: Опубликовать
+        run: dotnet publish FlightRadarScreensaver/FlightRadarScreensaver.csproj -c Release --no-build -o artifacts/publish
 
-      - name: Создать .scr
+      - name: Создать .scr и добавить README
         shell: pwsh
         run: |
-          Copy-Item artifacts/publish/FlightRadarScreensaver.exe `
-                    artifacts/publish/FlightRadarScreensaver.scr
-          Write-Host "Создан artifacts/publish/FlightRadarScreensaver.scr"
+          $publish = 'artifacts/publish'
+          Copy-Item "$publish/FlightRadarScreensaver.exe" "$publish/FlightRadarScreensaver.scr"
+          Copy-Item 'README.md' "$publish/README.md"
+          Write-Host "Готово: $publish/FlightRadarScreensaver.scr"
 
-      - name: Проверить наличие ресурсов
+      - name: Проверить состав сборки
         shell: pwsh
         run: |
           $required = @(
@@ -54,6 +50,7 @@ jobs:
             'artifacts/publish/FlightRadarScreensaver.deps.json',
             'artifacts/publish/FlightRadarScreensaver.runtimeconfig.json',
             'artifacts/publish/appsettings.json',
+            'artifacts/publish/install.bat',
             'artifacts/publish/Assets/app.ico',
             'artifacts/publish/WebAssets/map.html',
             'artifacts/publish/WebAssets/leaflet.js',
@@ -66,7 +63,7 @@ jobs:
           }
 
           if ($missing.Count -gt 0) {
-            Write-Host "Отсутствуют файлы:"
+            Write-Host "Отсутствуют обязательные файлы:"
             $missing | ForEach-Object { Write-Host "  $_" }
             exit 1
           }

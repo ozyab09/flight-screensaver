@@ -36,52 +36,54 @@ jobs:
           if (-not $tag) { $tag = '${{ github.ref_name }}' }
           if (-not $tag.StartsWith('v')) { $tag = "v$tag" }
           "value=$tag" >> $env:GITHUB_OUTPUT
-          Write-Host "Тег: $tag"
+          Write-Host "Тег релиза: $tag"
 
-      - name: Собрать самодостаточную версию (без установленного .NET)
-        run: >
+      - name: Собрать самодостаточную версию
+        run: >-
           dotnet publish FlightRadarScreensaver/FlightRadarScreensaver.csproj
-          -c Release
-          -r win-x64
-          --self-contained true
-          -o artifacts/publish
+          -c Release -r win-x64 --self-contained true -o artifacts/publish
 
       - name: Подготовить пакет
         shell: pwsh
         run: |
-          Copy-Item artifacts/publish/FlightRadarScreensaver.exe `
-                    artifacts/publish/FlightRadarScreensaver.scr
+          $publish = 'artifacts/publish'
+          Copy-Item "$publish/FlightRadarScreensaver.exe" "$publish/FlightRadarScreensaver.scr"
+          Copy-Item 'README.md' "$publish/README.md"
+          Copy-Item 'LICENSE'   "$publish/LICENSE"
 
-          Compress-Archive -Path artifacts/publish `
-                          -DestinationPath "FlightRadarScreensaver-${{ steps.tag.outputs.value }}-win-x64.zip"
+          Compress-Archive -Path $publish -DestinationPath "FlightRadarScreensaver-${{ steps.tag.outputs.value }}-win-x64.zip"
 
-      - name: Собрать changelog релиза
+      - name: Подготовить заметки релиза
         shell: pwsh
         run: |
-          $notesPath = "release-notes-${{ steps.tag.outputs.value }}.md"
-          if (Test-Path CHANGELOG.md) {
-            # Берём раздел с последним тегом
-            $version = "${{ steps.tag.outputs.value }}"
-            $lines = Get-Content CHANGELOG.md
-            $start = ($lines | Select-String -SimpleMatch $version | Select-Object -First 1).LineNumber
-            if ($start) {
-              $tail = $lines[($start - 1)..($lines.Count - 1)]
-              $nextHeading = ($tail | Select-String -Pattern '^## ' | Select-Object -Skip 1 -First 1).LineNumber
-              if ($nextHeading) { $tail = $tail[0..($nextHeading - 2)] }
-              $tail -join "`n" | Set-Content -Path $notesPath -Encoding UTF8
+          $version = '${{ steps.tag.outputs.value }}'
+          $notesPath = "release-notes-$version.md"
+
+          if (Test-Path 'CHANGELOG.md') {
+            $lines = Get-Content 'CHANGELOG.md'
+            $hit = $lines | Select-String -SimpleMatch $version | Select-Object -First 1
+            if ($hit) {
+              $tail = $lines[($hit.LineNumber - 1)..($lines.Count - 1)]
+              $next = $tail | Select-String -Pattern '^## ' | Select-Object -Skip 1 -First 1
+              if ($next) { $tail = $tail[0..($next.LineNumber - 2)] }
+              ($tail -join "`n") | Set-Content -Path $notesPath -Encoding UTF8
             }
           }
+
           if (-not (Test-Path $notesPath)) {
-            @"
-## ${{ steps.tag.outputs.value }}
-
-Сборка заставки FlightRadar Screensaver.
-
-**Установка:** распакуйте архив и запустите \`install.bat\` от имени администратора,
-затем выберите заставку в `desk.cpl`.
-"@ | Set-Content -Path $notesPath -Encoding UTF8
+            $fallback = @(
+              "## $version",
+              '',
+              'Сборка заставки FlightRadar Screensaver.',
+              '',
+              '**Установка:** распакуйте архив, запустите install.bat от имени',
+              'администратора, затем выберите заставку в desk.cpl.'
+            )
+            Set-Content -Path $notesPath -Value $fallback -Encoding UTF8
           }
-          Write-Host "Заметки релиза:"; Get-Content $notesPath
+
+          Write-Host "Заметки релиза:"
+          Get-Content $notesPath
 
       - name: Создать GitHub Release
         uses: softprops/action-gh-release@v2
