@@ -7,8 +7,8 @@
 Нативный `.scr` на .NET 8 + WPF: реальные полёты из **OpenSky Network**,
 карта Leaflet в WebView2, настройка точки и масштаба.
 
-[![Build](https://github.com/OWNER/FlightRadarScreensaver/actions/workflows/build.yml/badge.svg)](https://github.com/OWNER/FlightRadarScreensaver/actions/workflows/build.yml)
-[![Release](https://github.com/OWNER/FlightRadarScreensaver/actions/workflows/release.yml/badge.svg)](https://github.com/OWNER/FlightRadarScreensaver/actions/workflows/release.yml)
+[![Build](https://github.com/ozyab09/flight-screensaver/actions/workflows/build.yml/badge.svg)](https://github.com/ozyab09/flight-screensaver/actions/workflows/build.yml)
+[![Release](https://github.com/ozyab09/flight-screensaver/actions/workflows/release.yml/badge.svg)](https://github.com/ozyab09/flight-screensaver/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
@@ -36,7 +36,9 @@
 
 ### Скачать готовое
 
-1. Скачайте архив из [Releases](https://github.com/OWNER/FlightRadarScreensaver/releases)
+1. Скачайте архив
+   [`FlightRadarScreensaver-v1.0.0-win-x64.zip`](https://github.com/ozyab09/flight-screensaver/releases/latest)
+   из раздела [Releases](https://github.com/ozyab09/flight-screensaver/releases)
 2. Распакуйте в любую папку
 3. Запустите **`install.bat`** от имени администратора
 4. `Win+R` → `desk.cpl` → вкладка **Заставка** → **FlightRadarScreensaver**
@@ -48,7 +50,7 @@
 Нужны Windows 10/11 x64 и [.NET 8 SDK](https://dotnet.microsoft.com/download).
 
 ```powershell
-git clone https://github.com/OWNER/FlightRadarScreensaver.git
+git clone https://github.com/ozyab09/flight-screensaver.git
 cd FlightRadarScreensaver
 
 # Готовый набор файлов для установки
