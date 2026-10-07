@@ -1,0 +1,46 @@
+name: Ошибка
+description: Что-то не работает
+labels: [bug]
+
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Что произошло
+      placeholder: Опишите проблему и как её воспроизвести
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Содержимое лога
+      description: >-
+        Приложение пишет подробный лог — вставьте его сюда,
+        это ускоряет разбор в разы.
+      render: text
+      placeholder: |
+        Скопируйте %TEMP%\FlightRadarScreensaver-crash.log
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Версия Windows
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+
+  - type: input
+    id: dotnet
+    attributes:
+      label: Версия .NET
+      description: Вывод команды dotnet --list-runtimes
+      placeholder: Microsoft.WindowsDesktop.App 8.0.x
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Дополнительно
+      description: Скриншоты, координаты, выбранный масштаб

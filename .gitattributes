@@ -1,0 +1,36 @@
+# Нормализация переводов строк
+
+* text=auto
+
+# .bat работает в cmd и требует CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# C# и проекты Visual Studio
+*.cs text eol=crlf
+*.csproj text eol=crlf
+*.xaml text eol=crlf
+*.sln text eol=crlf
+*.manifest text eol=crlf
+*.ps1 text eol=crlf
+
+# Веб-ресурсы, конфиги и документация
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.editorconfig text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# Бинарные файлы
+*.ico binary
+*.png binary
+*.jpg binary
+*.dll binary
+*.exe binary
+*.scr binary
+*.zip binary

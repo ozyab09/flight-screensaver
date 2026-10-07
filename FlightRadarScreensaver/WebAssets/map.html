@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>FlightRadar Map</title>
+    <link rel="stylesheet" href="leaflet.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body, #map { height: 100%; width: 100%; background: #07070A; }
+        .leaflet-container { background: #07070A; font-family: "Segoe UI", Tahoma, sans-serif; }
+        #map { cursor: default; }
+
+        /* Панель сведений о самолёте */
+        #aircraft-info {
+            position: absolute; z-index: 900; display: none;
+            min-width: 232px; max-width: 300px;
+            background: rgba(14, 17, 23, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 13px 15px;
+            color: #fff;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(8px);
+            pointer-events: none;
+        }
+        #aircraft-info .callsign { font-size: 16px; font-weight: 700; letter-spacing: .3px; }
+        #aircraft-info .sub { font-size: 11px; color: #8E93A0; margin-top: 2px; }
+        #aircraft-info .sep { height: 1px; background: rgba(255,255,255,.1); margin: 10px 0; }
+        #aircraft-info .row { display: flex; justify-content: space-between; gap: 16px; font-size: 12px; margin: 4px 0; }
+        #aircraft-info .row .k { color: #8E93A0; }
+        #aircraft-info .row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+        #aircraft-hint {
+            position: absolute; z-index: 850; display: none;
+            left: 16px; bottom: 16px;
+            background: rgba(14, 17, 23, 0.8);
+            border: 1px solid rgba(255,255,255,.1);
+            color: #9AA0AC; font-size: 11.5px;
+            padding: 7px 11px; border-radius: 9px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="aircraft-info"></div>
+    <div id="aircraft-hint">Клик по самолёту — подробности</div>
+
+    <script src="leaflet.js"></script>
+    <script>
+    (function () {
+        "use strict";
+
+        // Источники тайлов. Публичные тайлы tile.openstreetmap.org запрещают
+        // встраивание в приложения (политика использования) и отвечают 403 на запросы
+        // из WebView2; тайлы CARTO теперь требуют API-ключ и возвращают
+        // заглушки «API KEY REQUIRED». Поэтому используем сервисы Esri —
+        // они работают без ключа. Порядок тайлов {z}/{y}/{x}.
+        var ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/";
+        var ATTR = "© Esri, HERE, Garmin, © OpenStreetMap contributors";
+
+        var MAP_STYLES = {
+            osm: {
+                url: ESRI + "World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+                attribution: ATTR
+            },
+            satellite: {
+                url: ESRI + "World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attribution: "© Esri, Maxar, Earthstar Geographics"
+            },
+            dark: {
+                url: ESRI + "Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+                attribution: ATTR
+            }
+        };
+
+        var MAX_RENDERED = 2500;   // предел отрисовки, чтобы не проседать на глобальных зумах
+        var MAX_TRAIL = 24;        // длина следа в точках
+        var MAX_LABELS = 90;       // предел подписей, иначе кадр превращается в кашу
+
+        var map = null;
+        var tileLayer = null;
+        var aircraft = null;       // icao24 -> flight
+        var selected = null;
+        var infoEl = document.getElementById("aircraft-info");
+        var hintEl = document.getElementById("aircraft-hint");
+
+        var config = {
+            showLabels: true,
+            showTrails: false,
+            mapStyle: "osm"
+        };
+
+        // ───────────────────────── Слой отрисовки самолётов ─────────────────────────
+        // Один canvas вместо тысяч DOM-маркеров: держит стабильный FPS при любом
+        // количестве бортов в зоне.
+        var AircraftLayer = L.Layer.extend({
+            onAdd: function (m) {
+                this._map = m;
+                var size = m.getSize();
+                this._canvas = L.DomUtil.create("canvas", "leaflet-zoom-animated", this._map.getPanes().overlayPane);
+                this._canvas.width = size.x;
+                this._canvas.height = size.y;
+                this._ctx = this._canvas.getContext("2d");
+                m.on("moveend zoomend resize", this._reset, this);
+                this._reset();
+            },
+
+            onRemove: function (m) {
+                L.DomUtil.remove(this._canvas);
+                m.off("moveend zoomend resize", this._reset, this);
+            },
+
+            redraw: function () {
+                if (!this._map) return;
+                this._ctx.setTransform(1, 0, 0, 1, 0, 0);
+                this._ctx.clearRect(0, 0, this._canvas.width, this._canvas.height);
+                this._draw();
+            },
+
+            _reset: function () {
+                var m = this._map;
+                var size = m.getSize();
+                var topLeft = m.containerPointToLayerPoint([0, 0]);
+
+                L.DomUtil.setPosition(this._canvas, topLeft);
+                this._canvas.width = size.x;   // сброс размера очищает canvas
+                this._canvas.height = size.y;
+
+                this._ctx = this._canvas.getContext("2d");
+                this._draw();
+            },
+
+            _draw: function () {
+                var m = this._map;
+                if (!m || !aircraft) return;
+
+                var ctx = this._ctx;
+                var zoom = m.getZoom();
+                var bounds = m.getBounds().pad(0.1);
+                var cw = this._canvas.width, ch = this._canvas.height;
+                var showLabels = config.showLabels;
+                var showTrails = config.showTrails;
+                var planeSize = zoom >= 11 ? 9 : (zoom >= 8 ? 7 : 5.5);
+
+                ctx.save();
+                ctx.lineJoin = "round";
+                ctx.lineCap = "round";
+
+                var drawn = 0;
+                var labels = 0;
+                var labelRects = [];   // занятые прямоугольники подписей
+
+                // Следы рисуем первыми, чтобы самолёты были поверх
+                if (showTrails) {
+                    ctx.strokeStyle = "rgba(0, 212, 255, 0.30)";
+                    ctx.lineWidth = Math.max(1, zoom / 12);
+                    aircraft.forEach(function (f) {
+                        if (!f.trail || f.trail.length < 2 || drawn >= MAX_RENDERED) return;
+                        if (!bounds.contains(f.latlng)) return;
+
+                        ctx.beginPath();
+                        for (var i = 0; i < f.trail.length; i++) {
+                            var p = m.latLngToLayerPoint(f.trail[i]);
+                            if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+                        }
+                        ctx.stroke();
+                    });
+                }
+
+                aircraft.forEach(function (f) {
+                    if (drawn >= MAX_RENDERED) return;
+
+                    var p = m.latLngToLayerPoint(f.renderLatLng || f.latlng);
+
+                    // Отсекаем всё, что вне холста: дешевле и не рисует мусор по краям
+                    var m2 = 40;
+                    if (p.x < -m2 || p.y < -m2 || p.x > cw + m2 || p.y > ch + m2) return;
+
+                    drawn++;
+
+                    var track = (f.track == null) ? 0 : f.track;
+
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(track * Math.PI / 180);
+
+                    var s = planeSize;
+                    var alpha = f.onGround ? 0.55 : 0.95;
+
+                    ctx.globalAlpha = alpha;
+
+                    // обводка для контраста на светлых тайлах
+                    ctx.beginPath();
+                    ctx.moveTo(0, -s);
+                    ctx.lineTo(s * 0.72, s * 0.85);
+                    ctx.lineTo(0, s * 0.38);
+                    ctx.lineTo(-s * 0.72, s * 0.85);
+                    ctx.closePath();
+
+                    ctx.fillStyle = f.onGround ? "#A0A4AD" : (f.selected ? "#FFD24A" : "#25E0FF");
+                    ctx.strokeStyle = "rgba(3, 12, 20, 0.85)";
+                    ctx.lineWidth = Math.max(0.8, s * 0.18);
+                    ctx.fill();
+                    ctx.stroke();
+
+                    ctx.restore();
+
+                    if (showLabels && f.callsign && labels < MAX_LABELS) {
+                        var sub = subtitleFor(f);
+
+                        ctx.save();
+                        ctx.textAlign = "left";
+                        ctx.textBaseline = "alphabetic";
+
+                        ctx.font = "700 10.5px 'Segoe UI', sans-serif";
+                        var w1 = ctx.measureText(f.callsign).width;
+                        ctx.font = "500 8.5px 'Segoe UI', sans-serif";
+                        var w2 = sub ? ctx.measureText(sub).width : 0;
+
+                        var bw = Math.max(w1, w2) + 7;
+                        var bh = sub ? 22 : 14;
+
+                        var lx = p.x + planeSize + 5;
+                        var ly = p.y - bh / 2;
+
+                        // Пропускаем подпись, если она перекрывается уже нарисованной
+                        if (overlaps(labelRects, lx, ly, bw, bh)) {
+                            ctx.restore();
+                            return;
+                        }
+
+                        labelRects.push({ x: lx, y: ly, w: bw, h: bh });
+                        labels++;
+
+                        roundRect(ctx, lx, ly, bw, bh, 4);
+                        ctx.fillStyle = "rgba(6, 10, 16, 0.72)";
+                        ctx.fill();
+                        ctx.strokeStyle = "rgba(255, 255, 255, 0.14)";
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+
+                        // Номер рейса
+                        ctx.font = "700 10.5px 'Segoe UI', sans-serif";
+                        ctx.fillStyle = f.selected ? "#FFD24A" : "#FFFFFF";
+                        ctx.fillText(f.callsign, lx + 3.5, ly + 10);
+
+                        // Страна регистрации и высота
+                        if (sub) {
+                            ctx.font = "500 8.5px 'Segoe UI', sans-serif";
+                            ctx.fillStyle = f.onGround ? "#8E93A0" : "#25E0FF";
+                            ctx.fillText(sub, lx + 3.5, ly + 19);
+                        }
+
+                        ctx.restore();
+                    }
+                });
+
+                ctx.restore();
+            }
+        });
+
+        // Пересекается ли прямоугольник подписи с уже занятыми.
+        function overlaps(rects, x, y, w, h) {
+            for (var i = 0; i < rects.length; i++) {
+                var r = rects[i];
+                if (x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y) return true;
+            }
+            return false;
+        }
+
+        // Скруглённый прямоугольник для подписи (roundRect есть не во всех сборках).
+        function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+        }
+
+        function fmtHeight(meters) {
+            if (meters == null) return "";
+            var m = Math.round(meters * 0.3048 / 50) * 50;   // кратно 50 м
+            return m.toLocaleString("ru-RU") + " м";
+        }
+
+        // Вторая строка подписи. Маршрута «откуда-куда» в бесплатном API OpenSky
+        // нет (эндпоинт /api/routes отдаёт 404 для анонимных запросов),
+        // поэтому показываем страну регистрации и высоту.
+        function subtitleFor(f) {
+            var parts = [];
+            if (f.originCountry) parts.push(f.originCountry);
+            var h = fmtHeight(f.altitude);
+            if (h) parts.push(h);
+            return parts.join(" · ");
+        }
+
+        // ───────────────────────── Инициализация ─────────────────────────
+        function initMap(lat, lon, zoom, mapStyle, showLabels, showTrails) {
+            config.showLabels = !!showLabels;
+            config.showTrails = !!showTrails;
+            config.mapStyle = mapStyle;
+
+            map = L.map("map", {
+                center: [lat, lon],
+                zoom: zoom,
+                zoomControl: false,
+                attributionControl: false,
+                preferCanvas: true,
+                doubleClickZoom: false,
+                scrollWheelZoom: false,
+                boxZoom: false,
+                keyboard: false,
+                dragging: false,
+                touchZoom: false,
+                tap: false
+            });
+
+            setMapStyle(mapStyle);
+            L.control.scale({ metric: true, imperial: false, position: "bottomleft" }).addTo(map);
+
+            aircraft = new Map();
+            var layer = new AircraftLayer();
+            layer.addTo(map);
+            window.__aircraftLayer = layer;   // точка входа для redraw()
+            window.__aircraft = aircraft;
+
+            map.on("click", onMapClick);
+
+            requestAnimationFrame(animate);
+
+            sendToHost({ type: "mapReady" });
+        }
+
+        // Разовая самопроверка холста: результат уходит в лог хоста.
+        function runDiagnostics() {
+            var layer = window.__aircraftLayer;
+            var canvas = layer && layer._canvas;
+            if (!canvas) {
+                sendToHost({ type: "error", message: "diag: no canvas element" });
+                return;
+            }
+
+            var ctx = canvas.getContext("2d");
+            var data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            var opaque = 0;
+            for (var i = 3; i < data.length; i += 4) {
+                if (data[i] > 10) opaque++;
+            }
+
+            var visible = 0, sample = null;
+            var bounds = map.getBounds().pad(0.25);
+            aircraft.forEach(function (f) {
+                if (bounds.contains(f.latlng)) {
+                    visible++;
+                    if (!sample) {
+                        var p = map.latLngToLayerPoint(f.latlng);
+                        sample = { icao: f.icao24, lat: f.latlng.lat, lng: f.latlng.lng, px: Math.round(p.x), py: Math.round(p.y) };
+                    }
+                }
+            });
+
+            sendToHost({
+                type: "diag",
+                info: JSON.stringify({
+                    canvas: canvas.width + "x" + canvas.height,
+                    parent: canvas.parentNode ? canvas.parentNode.className : "none",
+                    opaquePixels: opaque,
+                    totalAircraft: aircraft.size,
+                    visibleAircraft: visible,
+                    zoom: map.getZoom(),
+                    center: map.getCenter().lat + "," + map.getCenter().lng,
+                    sample: sample
+                })
+            });
+        }
+
+        function setMapStyle(styleName) {
+            if (!map) return;
+            var style = MAP_STYLES[styleName] || MAP_STYLES.osm;
+            if (tileLayer) map.removeLayer(tileLayer);
+
+            var failures = 0;
+            var reported = false;
+            tileLayer = L.tileLayer(style.url, {
+                maxZoom: 18,
+                attribution: style.attribution
+            }).addTo(map);
+
+            tileLayer.on("tileerror", function () {
+                failures++;
+                // Докладываем о проблеме один раз, а не на каждый тайл
+                if (failures === 5 && !reported) {
+                    reported = true;
+                    sendToHost({ type: "error", message: "tiles failing for style '" + styleName + "'" });
+                }
+            });
+            tileLayer.on("tileload", function () {
+                if (reported) return;
+                reported = true;
+                sendToHost({ type: "tilesOk", style: styleName });
+            });
+
+            tileLayer.bringToBack();
+        }
+
+        // ───────────────────────── Данные ─────────────────────────
+        function updateFlights(list) {
+            if (!map || !aircraft) return;
+
+            var seen = Object.create(null);
+            var i, f, prev;
+
+            for (i = 0; i < list.length; i++) {
+                f = list[i];
+                if (f.lat == null || f.lon == null) continue;
+                seen[f.icao24] = true;
+
+                prev = aircraft.get(f.icao24);
+                if (prev) {
+                    // интерполяция: между опросами дорисовываем положение
+                    prev.fromLatLng = prev.latlng;
+                    prev.fromWhen = performance.now();
+                    prev.latlng = L.latLng(f.lat, f.lon);
+                    prev.track = (f.track == null) ? prev.track : f.track;
+                    prev.callsign = f.callsign || prev.callsign;
+                    prev.originCountry = f.originCountry || prev.originCountry;
+                    prev.altitude = f.altitude;
+                    prev.velocity = f.velocity;
+                    prev.verticalRate = f.verticalRate;
+                    prev.onGround = !!f.onGround;
+                    if (config.showTrails) {
+                        prev.trail.push(prev.latlng);
+                        if (prev.trail.length > MAX_TRAIL) prev.trail.shift();
+                    }
+                } else {
+                    aircraft.set(f.icao24, {
+                        icao24: f.icao24,
+                        callsign: f.callsign || f.icao24,
+                        originCountry: f.originCountry || "",
+                        latlng: L.latLng(f.lat, f.lon),
+                        fromLatLng: null,
+                        fromWhen: 0,
+                        track: f.track,
+                        altitude: f.altitude,
+                        velocity: f.velocity,
+                        verticalRate: f.verticalRate,
+                        onGround: !!f.onGround,
+                        trail: config.showTrails ? [L.latLng(f.lat, f.lon)] : [],
+                        selected: false
+                    });
+                }
+            }
+
+            // Убираем борта, исчезнувшие из ответа
+            aircraft.forEach(function (value, key) {
+                if (!seen[key]) aircraft.delete(key);
+            });
+
+            if (selected && !aircraft.has(selected)) { selected = null; hideInfo(); }
+
+            window.__aircraftLayer.redraw();
+
+            if (!window.__diagDone) {
+                window.__diagDone = true;
+                // setTimeout, а не requestAnimationFrame: в WebView2 rAF может
+                // не срабатывать, когда окно не в фокусе.
+                setTimeout(runDiagnostics, 900);
+            }
+        }
+
+        // Плавное перемещение между опросами. Цикл запускается из initMap:
+        // раньше он стартовал до создания слоя и сразу завершался.
+        function animate() {
+            if (!map || !window.__aircraftLayer) return;
+
+            var now = performance.now();
+            var moving = false;
+
+            aircraft.forEach(function (f) {
+                if (f.fromLatLng && f.fromWhen) {
+                    var t = Math.min(1, (now - f.fromWhen) / 2000);
+                    if (t < 1) {
+                        moving = true;
+                        var lat = f.fromLatLng.lat + (f.latlng.lat - f.fromLatLng.lat) * t;
+                        var lng = f.fromLatLng.lng + (f.latlng.lng - f.fromLatLng.lng) * t;
+                        f.renderLatLng = L.latLng(lat, lng);
+                    } else {
+                        f.fromLatLng = null;
+                        f.fromWhen = 0;
+                        f.renderLatLng = f.latlng;
+                    }
+                } else {
+                    f.renderLatLng = f.latlng;
+                }
+            });
+
+            // Перерисовываем, только пока борта "едут", иначе простаиваем зря
+            if (moving) window.__aircraftLayer.redraw();
+
+            requestAnimationFrame(animate);
+        }
+
+        // ───────────────────────── Взаимодействие ─────────────────────────
+        function onMapClick(e) {
+            var best = null, bestDist = 26 * 26;
+
+            aircraft.forEach(function (f) {
+                var p = map.latLngToContainerPoint(f.renderLatLng || f.latlng);
+                var dx = p.x - e.containerPoint.x, dy = p.y - e.containerPoint.y;
+                var d = dx * dx + dy * dy;
+                if (d < bestDist) { bestDist = d; best = f; }
+            });
+
+            if (!best) { selected = null; hideInfo(); return; }
+
+            if (selected) selected.selected = false;
+            selected = best;
+            best.selected = true;
+            showInfo(best, e.containerPoint);
+            window.__aircraftLayer.redraw();
+        }
+
+        function showInfo(f, point) {
+            var alt = f.altitude != null ? Math.round(f.altitude * 3.28084).toLocaleString("ru-RU") + " ft" : "—";
+            var spd = f.velocity != null ? Math.round(f.velocity * 3.6) + " км/ч" : "—";
+            var trk = f.track != null ? Math.round(f.track) + "°" : "—";
+            var vs = f.verticalRate != null
+                ? (f.verticalRate > 0 ? "+" : "") + Math.round(f.verticalRate * 196.85) + " фут/мин"
+                : "—";
+
+            infoEl.innerHTML =
+                '<div class="callsign">' + esc(f.callsign) + '</div>' +
+                '<div class="sub">' + esc(f.icao24) + (f.originCountry ? " · " + esc(f.originCountry) : "") + '</div>' +
+                '<div class="sep"></div>' +
+                '<div class="row"><span class="k">Высота</span><span class="v">' + alt + '</span></div>' +
+                '<div class="row"><span class="k">Скорость</span><span class="v">' + spd + '</span></div>' +
+                '<div class="row"><span class="k">Курс</span><span class="v">' + trk + '</span></div>' +
+                '<div class="row"><span class="k">Верт. скорость</span><span class="v">' + vs + '</span></div>' +
+                '<div class="row"><span class="k">На земле</span><span class="v">' + (f.onGround ? "да" : "нет") + '</span></div>' +
+                '<div class="note">Маршрут «откуда-куда» недоступен: в открытом API OpenSky Network его нет.</div>';
+
+            infoEl.style.display = "block";
+            var w = infoEl.offsetWidth, h = infoEl.offsetHeight;
+            var left = point.x + 18;
+            var top = point.y - h / 2;
+            if (left + w > map.getSize().x - 8) left = point.x - w - 18;
+            top = Math.max(8, Math.min(top, map.getSize().y - h - 8));
+            infoEl.style.left = left + "px";
+            infoEl.style.top = top + "px";
+
+            hintEl.style.display = "none";
+        }
+
+        function hideInfo() { infoEl.style.display = "none"; }
+
+        function esc(s) {
+            return String(s == null ? "" : s)
+                .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        // ───────────────────────── Мост с хостом ─────────────────────────
+        function sendToHost(obj) {
+            if (window.chrome && window.chrome.webview) {
+                // Объект, а не JSON-строка: иначе C# получит строковый литерал.
+                window.chrome.webview.postMessage(obj);
+            }
+        }
+
+        function handleHostMessage(e) {
+            try {
+                // PostWebMessageAsJson отдаёт объект, PostWebMessage — строку.
+                var msg = (typeof e.data === "string") ? JSON.parse(e.data) : e.data;
+
+                switch (msg.type) {
+                    case "init":
+                        initMap(msg.lat, msg.lon, msg.zoom, msg.mapStyle, msg.showLabels, msg.showTrails);
+                        break;
+                    case "updateFlights":
+                        updateFlights(msg.flights || []);
+                        break;
+                    case "updateConfig":
+                        if (msg.showLabels !== undefined) config.showLabels = !!msg.showLabels;
+                        if (msg.showTrails !== undefined) config.showTrails = !!msg.showTrails;
+                        if (msg.mapStyle !== undefined && msg.mapStyle !== config.mapStyle) {
+                            config.mapStyle = msg.mapStyle;
+                            setMapStyle(msg.mapStyle);
+                        }
+                        break;
+                }
+            } catch (err) {
+                console.error("Message handling failed:", err);
+                sendToHost({ type: "error", message: String(err && err.message ? err.message : err) });
+            }
+        }
+
+        window.addEventListener("error", function (ev) {
+            sendToHost({ type: "error", message: ev.message + " @" + ev.filename + ":" + ev.lineno });
+        });
+
+        // Слушатель регистрируется сразу при загрузке страницы: если зарегистрировать
+        // его после initMap(), команда "init" никогда не дойдёт (взаимная блокировка).
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.addEventListener("message", handleHostMessage);
+        } else {
+            window.addEventListener("DOMContentLoaded", function () {
+                console.error("WebView2 host is not available");
+            });
+        }
+    })();
+    </script>
+</body>
+</html>

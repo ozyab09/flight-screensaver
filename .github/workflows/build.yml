@@ -1,0 +1,85 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Сборка (windows-latest)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Установить .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Восстановить пакеты
+        run: dotnet restore FlightRadarScreensaver/FlightRadarScreensaver.csproj
+
+      - name: Собрать (Release)
+        run: >
+          dotnet build FlightRadarScreensaver/FlightRadarScreensaver.csproj
+          -c Release --no-restore
+
+      - name: Опубликовать (framework-dependent)
+        run: >
+          dotnet publish FlightRadarScreensaver/FlightRadarScreensaver.csproj
+          -c Release --no-build
+          -o artifacts/publish
+
+      - name: Создать .scr
+        shell: pwsh
+        run: |
+          Copy-Item artifacts/publish/FlightRadarScreensaver.exe `
+                    artifacts/publish/FlightRadarScreensaver.scr
+          Write-Host "Создан artifacts/publish/FlightRadarScreensaver.scr"
+
+      - name: Проверить наличие ресурсов
+        shell: pwsh
+        run: |
+          $required = @(
+            'artifacts/publish/FlightRadarScreensaver.scr',
+            'artifacts/publish/FlightRadarScreensaver.dll',
+            'artifacts/publish/FlightRadarScreensaver.deps.json',
+            'artifacts/publish/FlightRadarScreensaver.runtimeconfig.json',
+            'artifacts/publish/appsettings.json',
+            'artifacts/publish/Assets/app.ico',
+            'artifacts/publish/WebAssets/map.html',
+            'artifacts/publish/WebAssets/leaflet.js',
+            'artifacts/publish/WebAssets/leaflet.css'
+          )
+
+          $missing = @()
+          foreach ($f in $required) {
+            if (-not (Test-Path $f)) { $missing += $f }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Host "Отсутствуют файлы:"
+            $missing | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+
+          Write-Host "Все $($required.Count) обязательных файлов на месте"
+
+      - name: Запаковать сборку
+        shell: pwsh
+        run: Compress-Archive -Path artifacts/publish -DestinationPath FlightRadarScreensaver-win-x64.zip
+
+      - name: Приложить сборку
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlightRadarScreensaver-win-x64
+          path: FlightRadarScreensaver-win-x64.zip
+          retention-days: 30

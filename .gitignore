@@ -1,0 +1,48 @@
+## .NET / MSBuild
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+[Bb]in/
+[Oo]bj/
+publish/
+artifacts/
+
+## Сборки скринсейвера — генерируются из исходников
+*.scr
+*.exe
+*.dll
+*.pdb
+*.zip
+
+## Важно: НЕ игнорировать (входят в сборку)
+!FlightRadarScreensaver/Assets/app.ico
+!FlightRadarScreensaver/WebAssets/*.css
+!FlightRadarScreensaver/WebAssets/*.js
+!FlightRadarScreensaver/WebAssets/*.html
+
+## WebView2
+WebView2Loader.dll
+
+## IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+
+## OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+## Прочее
+*.log
+*.tmp
+*.bak

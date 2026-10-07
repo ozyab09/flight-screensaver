@@ -1,0 +1,66 @@
+<Window x:Class="FlightRadarScreensaver.Views.ScreensaverWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="FlightRadar Screensaver"
+        Background="#0B0B0F"
+        FontFamily="Segoe UI"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Ideal">
+
+    <!--
+        Обработчики ввода НЕ заданы в XAML: WebView2 — это HWND-элемент,
+        он перехватывает мышь и клавиатуру, и маршрутизируемые события WPF
+        до окна не доходят. Ввод подключается в коде через AddHandler(..., true)
+        и опросом позиции курсора.
+    -->
+
+    <Grid>
+        <wv2:WebView2 x:Name="WebView" DefaultBackgroundColor="#0B0B0F" />
+
+        <!-- Экран загрузки -->
+        <Border x:Name="LoadingOverlay" Background="#0B0B0F">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520">
+                <Border Width="58" Height="58" CornerRadius="15" Background="#0A84FF"
+                        HorizontalAlignment="Center" Margin="0,0,0,22">
+                    <TextBlock Text="FR" Foreground="White" FontWeight="Bold" FontSize="21"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="FlightRadar Screensaver" Foreground="White" FontSize="21"
+                           FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <TextBlock x:Name="LoadingText" Text="Подключение к карте…"
+                           Foreground="#9A9AA0" FontSize="13" Margin="0,8,0,0"
+                           HorizontalAlignment="Center" TextAlignment="Center"
+                           TextWrapping="Wrap" />
+                <ProgressBar x:Name="LoadingBar" Width="220" Height="3" IsIndeterminate="True"
+                             Margin="0,22,0,0" Foreground="#0A84FF" Background="#2A2A30"
+                             BorderThickness="0" />
+                <TextBlock Foreground="#5A5A62" FontSize="11.5" Margin="0,18,0,0"
+                           HorizontalAlignment="Center" TextAlignment="Center">
+                    Данные: OpenSky Network · Карта: OpenStreetMap
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- Инфо-панель: сворачивается, чтобы не мешать просмотру -->
+        <Border x:Name="InfoPanel"
+                Background="#D90C1017"
+                CornerRadius="12"
+                Padding="16,13"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Left"
+                Margin="20"
+                Visibility="Collapsed">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.5" Color="Black" />
+            </Border.Effect>
+            <StackPanel>
+                <TextBlock x:Name="InfoCity" Foreground="White" FontSize="15" FontWeight="SemiBold" />
+                <TextBlock x:Name="InfoCoords" Foreground="#B4B4BC" FontSize="11.5" Margin="0,3,0,0" />
+                <Rectangle Height="1" Fill="#2E2E36" Margin="0,10,0,9" />
+                <TextBlock x:Name="InfoCount" Foreground="#00D4FF" FontSize="12.5" FontWeight="SemiBold" />
+                <TextBlock x:Name="InfoUpdated" Foreground="#7C7C86" FontSize="11" Margin="0,3,0,0" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

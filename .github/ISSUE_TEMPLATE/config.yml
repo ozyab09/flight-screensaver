@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Сборка и развёртывание
+    url: https://github.com/OWNER/FlightRadarScreensaver/blob/main/CONTRIBUTING.md
+    about: Как собрать проект, требования и известные подводные камни
+  - name: Данные OpenSky Network
+    url: https://opensky-network.org/apidoc/rest.html
+    about: Документация по API: поля ответа, лимиты, ограничения
+  - name: API WebView2
+    url: https://learn.microsoft.com/microsoft-edge/webview2/
+    about: Документация по встроенному браузеру, если есть проблемы с инициализацией
